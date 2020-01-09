@@ -5,3 +5,4 @@
 extern crate bitflags;
 
 pub mod exec;
+pub mod elf;
