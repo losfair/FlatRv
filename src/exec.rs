@@ -26,7 +26,7 @@ pub trait Host: Sized + 'static {
     fn global_context() -> &'static GlobalContext<Self>;
 
     #[inline(always)]
-    fn cycle(_m: &mut Machine<Self>, _pc: u32) {}
+    fn cycle_will_run(_m: &mut Machine<Self>, _pc: u32) {}
 }
 
 /// Result from ecall.
@@ -217,11 +217,12 @@ impl<H: Host> Machine<H> {
         } else {
             H::raise_exception(self, pc.into(), Exception::InstructionAddressMisaligned);
         };
+
+        H::cycle_will_run(self, u32::from(pc));
+
         let inst = mem_load_32(pc.into());
         let opcode = (inst & 0b1111111) as usize;
         let funct3 = ((inst >> 12) & 0b111) as usize;
-
-        H::cycle(self, u32::from(pc));
 
         // `x0` should always be zero.
         self.gregs[0] = 0;
@@ -642,42 +643,42 @@ fn sext21b(src: u32) -> u32 {
 #[inline(always)]
 fn mem_load_32(ptr: u32) -> u32 {
     unsafe {
-        *(ptr as *mut u32)
+        core::ptr::read_volatile(ptr as *mut u32)
     }
 }
 
 #[inline(always)]
 fn mem_store_32(ptr: u32, val: u32) {
     unsafe {
-        *(ptr as *mut u32) = val;
+        core::ptr::write_volatile(ptr as *mut u32, val)
     }
 }
 
 #[inline(always)]
 fn mem_load_16(ptr: u32) -> u16 {
     unsafe {
-        *(ptr as *mut u16)
+        core::ptr::read_volatile(ptr as *mut u16)
     }
 }
 
 #[inline(always)]
 fn mem_store_16(ptr: u32, val: u16) {
     unsafe {
-        *(ptr as *mut u16) = val;
+        core::ptr::write_volatile(ptr as *mut u16, val)
     }
 }
 
 #[inline(always)]
 fn mem_load_8(ptr: u32) -> u8 {
     unsafe {
-        *(ptr as *mut u8)
+        core::ptr::read_volatile(ptr as *mut u8)
     }
 }
 
 #[inline(always)]
 fn mem_store_8(ptr: u32, val: u8) {
     unsafe {
-        *(ptr as *mut u8) = val;
+        core::ptr::write_volatile(ptr as *mut u8, val)
     }
 }
 
