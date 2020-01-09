@@ -24,6 +24,9 @@ pub trait Host: Sized + 'static {
     fn raise_exception(m: &mut Machine<Self>, pc: u32, exc: Exception) -> !;
     fn ecall(m: &mut Machine<Self>, pc: u32) -> EcallOutput;
     fn global_context() -> &'static GlobalContext<Self>;
+
+    #[inline(always)]
+    fn cycle(_m: &mut Machine<Self>, _pc: u32) {}
 }
 
 /// Result from ecall.
@@ -217,6 +220,8 @@ impl<H: Host> Machine<H> {
         let inst = mem_load_32(pc.into());
         let opcode = (inst & 0b1111111) as usize;
         let funct3 = ((inst >> 12) & 0b111) as usize;
+
+        H::cycle(self, u32::from(pc));
 
         // `x0` should always be zero.
         self.gregs[0] = 0;
@@ -514,7 +519,7 @@ impl<H: Host> Machine<H> {
     fn i_ecallbreak(&mut self, _pc: AlignedPC, _inst: u32) {
         let func = inst_i_imm(_inst);
         if likely(func == 0) {
-            let output = H::ecall(self, _pc.into());
+            let output = H::ecall(self, u32::from(_pc.next()));
             if let Some(new_pc) = output.new_pc {
                 self.do_dispatch(new_pc)
             } else {
