@@ -223,12 +223,12 @@ impl<H: Host> Machine<H> {
     }
 
     fn i_lui(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = inst_u_imm(_inst).wrapping_shl(12);
+        self.gregs[inst_rd(_inst)] = inst_u_imm(_inst);
         self.do_dispatch(_pc.next())
     }
 
     fn i_auipc(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = inst_u_imm(_inst).wrapping_shl(12).wrapping_add(_pc.into());
+        self.gregs[inst_rd(_inst)] = inst_u_imm(_inst).wrapping_add(_pc.into());
         self.do_dispatch(_pc.next())
     }
 
