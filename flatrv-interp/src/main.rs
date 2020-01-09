@@ -16,8 +16,8 @@ impl Host for TestHost {
     }
     #[inline(never)]
     fn ecall(m: &mut Machine<Self>, pc: u32) -> EcallOutput {
-        println!("ecall @ {:08x}: {}", pc, m.gregs[10]);
-        std::process::exit(0);
+        let gregs: Vec<String> = m.gregs.iter().enumerate().map(|(i, x)| format!("\t{}: {:08x}", i, x)).collect();
+        println!("ecall @ {:08x}: \n{}", pc, gregs.join("\n"));
         EcallOutput::default()
     }
     fn global_context() -> &'static GlobalContext<Self> {
