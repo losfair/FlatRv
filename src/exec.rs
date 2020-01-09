@@ -46,6 +46,7 @@ pub enum Exception {
     InvalidOpcode,
     InvalidMemoryReference,
     InstructionAddressMisaligned,
+    Ebreak,
 }
 
 /// Exception type.
@@ -511,11 +512,18 @@ impl<H: Host> Machine<H> {
         self.do_dispatch(_pc.next())
     }
     fn i_ecallbreak(&mut self, _pc: AlignedPC, _inst: u32) {
-        let output = H::ecall(self, _pc.into());
-        if let Some(new_pc) = output.new_pc {
-            self.do_dispatch(new_pc);
+        let func = inst_i_imm(_inst);
+        if likely(func == 0) {
+            let output = H::ecall(self, _pc.into());
+            if let Some(new_pc) = output.new_pc {
+                self.do_dispatch(new_pc)
+            } else {
+                self.do_dispatch(_pc.next())
+            }
+        } else if func == 1 {
+            H::raise_exception(self, _pc.into(), Exception::Ebreak);
         } else {
-            self.do_dispatch(_pc.next())
+            H::raise_exception(self, _pc.into(), Exception::InvalidOpcode);
         }
     }
 
