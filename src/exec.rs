@@ -50,6 +50,7 @@ pub enum Exception {
     InvalidMemoryReference,
     InstructionAddressMisaligned,
     Ebreak,
+    Wfi,
 }
 
 /// Exception type.
@@ -528,6 +529,8 @@ impl<H: Host> Machine<H> {
             }
         } else if func == 1 {
             H::raise_exception(self, _pc.into(), Exception::Ebreak);
+        } else if func == 0b0001_0000_0101 {
+            H::raise_exception(self, _pc.into(), Exception::Wfi);
         } else {
             H::raise_exception(self, _pc.into(), Exception::InvalidOpcode);
         }
