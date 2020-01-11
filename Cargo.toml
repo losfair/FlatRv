@@ -3,7 +3,8 @@ name = "flatrv"
 version = "0.1.0"
 authors = ["losfair <zhy20000919@hotmail.com>"]
 edition = "2018"
-
+description = "A cross-platform RISC-V interpreter that implements the RV32IM instruction set."
+license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
