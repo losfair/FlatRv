@@ -27,6 +27,12 @@ pub trait Host: Sized + 'static {
 
     #[inline(always)]
     fn cycle_will_run(_m: &mut Machine<Self>, _pc: u32) {}
+
+    #[inline(always)]
+    fn mem_address_offset(_m: &mut Machine<Self>) -> usize { 0 }
+
+    #[inline(always)]
+    fn mem_address_mask(_m: &mut Machine<Self>) -> u32 { core::u32::MAX }
 }
 
 /// Result from ecall.
@@ -221,7 +227,7 @@ impl<H: Host> Machine<H> {
 
         H::cycle_will_run(self, u32::from(pc));
 
-        let inst = mem_load_32(pc.into());
+        let inst = self.mem_load_32(pc.into());
         let opcode = (inst & 0b1111111) as usize;
         let funct3 = ((inst >> 12) & 0b111) as usize;
 
@@ -302,49 +308,49 @@ impl<H: Host> Machine<H> {
     fn i_lb(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        self.gregs[inst_rd(_inst)] = mem_load_8(base + offset) as i8 as i32 as u32;
+        self.gregs[inst_rd(_inst)] = self.mem_load_8(base + offset) as i8 as i32 as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_lh(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        self.gregs[inst_rd(_inst)] = mem_load_16(base + offset) as i16 as i32 as u32;
+        self.gregs[inst_rd(_inst)] = self.mem_load_16(base + offset) as i16 as i32 as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_lw(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        self.gregs[inst_rd(_inst)] = mem_load_32(base + offset);
+        self.gregs[inst_rd(_inst)] = self.mem_load_32(base + offset);
         self.do_dispatch(_pc.next()) 
     }
     fn i_lbu(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        self.gregs[inst_rd(_inst)] = mem_load_8(base + offset) as u32;
+        self.gregs[inst_rd(_inst)] = self.mem_load_8(base + offset) as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_lhu(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        self.gregs[inst_rd(_inst)] = mem_load_16(base + offset) as u32;
+        self.gregs[inst_rd(_inst)] = self.mem_load_16(base + offset) as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_sb(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        mem_store_8(base + offset, self.gregs[inst_rs2(_inst)] as u8);
+        self.mem_store_8(base + offset, self.gregs[inst_rs2(_inst)] as u8);
         self.do_dispatch(_pc.next()) 
     }
     fn i_sh(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        mem_store_16(base + offset, self.gregs[inst_rs2(_inst)] as u16);
+        self.mem_store_16(base + offset, self.gregs[inst_rs2(_inst)] as u16);
         self.do_dispatch(_pc.next()) 
     }
     fn i_sw(&mut self, _pc: AlignedPC, _inst: u32) {
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
-        mem_store_32(base + offset, self.gregs[inst_rs2(_inst)]);
+        self.mem_store_32(base + offset, self.gregs[inst_rs2(_inst)]);
         self.do_dispatch(_pc.next()) 
     }
     fn i_addi(&mut self, _pc: AlignedPC, _inst: u32) {
@@ -569,6 +575,54 @@ impl<H: Host> Machine<H> {
         self.gregs[inst_rd(_inst)] = unchecked_rem_u32(self.gregs[inst_rs1(_inst)], self.gregs[inst_rs2(_inst)]);
         self.do_dispatch(_pc.next())
     }
+
+    #[inline(always)]
+    unsafe fn translate_ptr<T>(&mut self, ptr: u32) -> *mut T {
+        let ptr = ptr & H::mem_address_mask(self);
+        (H::mem_address_offset(self) + (ptr as usize)) as *mut T
+    }
+
+    #[inline(always)]
+    fn mem_load_32(&mut self, ptr: u32) -> u32 {
+        unsafe {
+            core::ptr::read_volatile(self.translate_ptr::<u32>(ptr))
+        }
+    }
+
+    #[inline(always)]
+    fn mem_store_32(&mut self, ptr: u32, val: u32) {
+        unsafe {
+            core::ptr::write_volatile(self.translate_ptr::<u32>(ptr), val)
+        }
+    }
+
+    #[inline(always)]
+    fn mem_load_16(&mut self, ptr: u32) -> u16 {
+        unsafe {
+            core::ptr::read_volatile(self.translate_ptr::<u16>(ptr))
+        }
+    }
+
+    #[inline(always)]
+    fn mem_store_16(&mut self, ptr: u32, val: u16) {
+        unsafe {
+            core::ptr::write_volatile(self.translate_ptr::<u16>(ptr), val)
+        }
+    }
+
+    #[inline(always)]
+    fn mem_load_8(&mut self, ptr: u32) -> u8 {
+        unsafe {
+            core::ptr::read_volatile(self.translate_ptr::<u8>(ptr))
+        }
+    }
+
+    #[inline(always)]
+    fn mem_store_8(&mut self, ptr: u32, val: u8) {
+        unsafe {
+            core::ptr::write_volatile(self.translate_ptr::<u8>(ptr), val)
+        }
+    }
 }
 
 #[inline(always)]
@@ -640,48 +694,6 @@ fn sext21b(src: u32) -> u32 {
         src | !0b111_111_111_111_111_111_111u32
     } else {
         src
-    }
-}
-
-#[inline(always)]
-fn mem_load_32(ptr: u32) -> u32 {
-    unsafe {
-        core::ptr::read_volatile(ptr as *mut u32)
-    }
-}
-
-#[inline(always)]
-fn mem_store_32(ptr: u32, val: u32) {
-    unsafe {
-        core::ptr::write_volatile(ptr as *mut u32, val)
-    }
-}
-
-#[inline(always)]
-fn mem_load_16(ptr: u32) -> u16 {
-    unsafe {
-        core::ptr::read_volatile(ptr as *mut u16)
-    }
-}
-
-#[inline(always)]
-fn mem_store_16(ptr: u32, val: u16) {
-    unsafe {
-        core::ptr::write_volatile(ptr as *mut u16, val)
-    }
-}
-
-#[inline(always)]
-fn mem_load_8(ptr: u32) -> u8 {
-    unsafe {
-        core::ptr::read_volatile(ptr as *mut u8)
-    }
-}
-
-#[inline(always)]
-fn mem_store_8(ptr: u32, val: u8) {
-    unsafe {
-        core::ptr::write_volatile(ptr as *mut u8, val)
     }
 }
 
