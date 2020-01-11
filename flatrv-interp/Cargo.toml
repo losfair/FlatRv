@@ -10,5 +10,5 @@ repository = "https://github.com/losfair/FlatRv"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-flatrv = { path = ".." }
+flatrv = { path = "..", version = "0.1" }
 nix = "0.16"
