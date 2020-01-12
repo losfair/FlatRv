@@ -4,8 +4,8 @@
 #[macro_use]
 extern crate bitflags;
 
-pub mod exec;
 pub mod elf;
+pub mod exec;
 
 #[cfg(target_arch = "x86_64")]
 #[path = "exec_x86_64.rs"]

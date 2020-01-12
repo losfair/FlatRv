@@ -1,10 +1,10 @@
 //! Core decode and execution logic for RV32I instructions.
 
-use core::marker::PhantomData;
-use spin::Once;
 use core::hint::unreachable_unchecked;
-use core::sync::atomic::Ordering;
 use core::intrinsics::{likely, unlikely};
+use core::marker::PhantomData;
+use core::sync::atomic::Ordering;
+use spin::Once;
 
 const OPCODE_LUT_SIZE: usize = 1 << 10;
 
@@ -39,13 +39,19 @@ pub trait Host: Sized + 'static {
     fn cycle_will_run(_m: &mut Machine<Self>, _pc: u32) {}
 
     #[inline(always)]
-    fn mem_address_offset(_m: &mut Machine<Self>) -> usize { 0 }
+    fn mem_address_offset(_m: &mut Machine<Self>) -> usize {
+        0
+    }
 
     #[inline(always)]
-    fn mem_address_limit(_m: &mut Machine<Self>) -> u32 { core::u32::MAX }
+    fn mem_address_limit(_m: &mut Machine<Self>) -> u32 {
+        core::u32::MAX
+    }
 
     #[inline(always)]
-    fn extension_enabled(_ext: Extension) -> bool { false }
+    fn extension_enabled(_ext: Extension) -> bool {
+        false
+    }
 }
 
 /// Result from ecall.
@@ -55,11 +61,11 @@ pub struct EcallOutput {
 }
 
 /// Exception.
-/// 
+///
 /// Passed to `Host.raise_exception` when the interpreter caught an exception. However,
 /// these exceptions *can* raise a hardware exception that is not handled by the interpreter,
 /// and therefore need to be caught by host-side logic:
-/// 
+///
 /// - Invalid opcode.
 /// - Invalid memory reference.
 /// - Division error.
@@ -74,8 +80,8 @@ pub enum Exception {
 }
 
 /// Exception type.
-/// 
-/// Not all 
+///
+/// Not all
 
 /// A token that represents safe access to the lower 32-bit address space.
 pub struct LowerAddressSpaceToken(PhantomData<()>);
@@ -84,7 +90,7 @@ pub struct LowerAddressSpaceToken(PhantomData<()>);
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct AlignedPC {
-    _unsafe_inner: u32
+    _unsafe_inner: u32,
 }
 
 impl AlignedPC {
@@ -120,7 +126,7 @@ impl From<AlignedPC> for u32 {
     }
 }
 
-type OpcodeHandler<H> = fn (&mut Machine<H>, pc: AlignedPC, inst: u32);
+type OpcodeHandler<H> = fn(&mut Machine<H>, pc: AlignedPC, inst: u32);
 
 struct OpcodeLut<H: Host> {
     opcode_funct3: [OpcodeHandler<H>; OPCODE_LUT_SIZE],
@@ -128,9 +134,9 @@ struct OpcodeLut<H: Host> {
 
 impl LowerAddressSpaceToken {
     /// Creates a `LowerAddressSpaceToken`.
-    /// 
+    ///
     /// This function is unsafe because the caller must guarantee that:
-    /// 
+    ///
     /// - The lower 32-bit address space is not used.
     /// - Exception handlers are properly set up to catch access faults from the lower 32-bit address space.
     pub unsafe fn new() -> LowerAddressSpaceToken {
@@ -140,16 +146,15 @@ impl LowerAddressSpaceToken {
 
 impl<H: Host> GlobalContext<H> {
     pub const fn new() -> GlobalContext<H> {
-        GlobalContext {
-            lut: Once::new(),
-        }
+        GlobalContext { lut: Once::new() }
     }
 }
 
 impl<H: Host> OpcodeLut<H> {
     /// Builds an opcode lookup table.
     fn new() -> OpcodeLut<H> {
-        let mut opcode_funct3: [Option<OpcodeHandler<H>>; OPCODE_LUT_SIZE] = [None; OPCODE_LUT_SIZE];
+        let mut opcode_funct3: [Option<OpcodeHandler<H>>; OPCODE_LUT_SIZE] =
+            [None; OPCODE_LUT_SIZE];
 
         for i in 0..=0b111 {
             opcode_funct3[(0b0110111 << 3) + i] = Some(Machine::i_lui);
@@ -191,7 +196,8 @@ impl<H: Host> OpcodeLut<H> {
         opcode_funct3[0b0001111_000] = Some(Machine::i_fence);
         opcode_funct3[0b1110011_000] = Some(Machine::i_ecallbreak);
 
-        #[cfg(feature = "ext-a")] {
+        #[cfg(feature = "ext-a")]
+        {
             if H::extension_enabled(Extension::A) {
                 if crate::exec_arch::atomic_is_supported() {
                     opcode_funct3[0b0101111_010] = Some(Machine::i_amo_32);
@@ -213,10 +219,8 @@ impl<H: Host> OpcodeLut<H> {
             }
             transmute::<_, [OpcodeHandler<H>; OPCODE_LUT_SIZE]>(as_u64)
         };
-        
-        OpcodeLut {
-            opcode_funct3
-        }
+
+        OpcodeLut { opcode_funct3 }
     }
 }
 
@@ -336,59 +340,60 @@ impl<H: Host> Machine<H> {
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_8(_pc, base + offset) as i8 as i32 as u32;
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_lh(&mut self, _pc: AlignedPC, _inst: u32) {
         self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_16(_pc, base + offset) as i16 as i32 as u32;
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_lw(&mut self, _pc: AlignedPC, _inst: u32) {
         self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_32(_pc, base + offset);
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_lbu(&mut self, _pc: AlignedPC, _inst: u32) {
         self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_8(_pc, base + offset) as u32;
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_lhu(&mut self, _pc: AlignedPC, _inst: u32) {
         self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_16(_pc, base + offset) as u32;
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_sb(&mut self, _pc: AlignedPC, _inst: u32) {
         self.deny_lr_sc(_pc);
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.mem_store_8(_pc, base + offset, self.gregs[inst_rs2(_inst)] as u8);
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_sh(&mut self, _pc: AlignedPC, _inst: u32) {
         self.deny_lr_sc(_pc);
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.mem_store_16(_pc, base + offset, self.gregs[inst_rs2(_inst)] as u16);
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_sw(&mut self, _pc: AlignedPC, _inst: u32) {
         self.deny_lr_sc(_pc);
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.mem_store_32(_pc, base + offset, self.gregs[inst_rs2(_inst)]);
-        self.do_dispatch(_pc.next()) 
+        self.do_dispatch(_pc.next())
     }
     fn i_addi(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = self.gregs[inst_rs1(_inst)].wrapping_add(sext12b(inst_i_imm(_inst)));
+        self.gregs[inst_rd(_inst)] =
+            self.gregs[inst_rs1(_inst)].wrapping_add(sext12b(inst_i_imm(_inst)));
         self.do_dispatch(_pc.next())
     }
     fn i_slti(&mut self, _pc: AlignedPC, _inst: u32) {
@@ -420,7 +425,8 @@ impl<H: Host> Machine<H> {
         self.do_dispatch(_pc.next())
     }
     fn i_slli(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = self.gregs[inst_rs1(_inst)].wrapping_shl(inst_i_imm(_inst) & 0b11111);
+        self.gregs[inst_rd(_inst)] =
+            self.gregs[inst_rs1(_inst)].wrapping_shl(inst_i_imm(_inst) & 0b11111);
         self.do_dispatch(_pc.next())
     }
     fn i_srli_srai(&mut self, _pc: AlignedPC, _inst: u32) {
@@ -430,7 +436,8 @@ impl<H: Host> Machine<H> {
             self.gregs[inst_rd(_inst)] = self.gregs[inst_rs1(_inst)].wrapping_shr(imm & 0b11111);
         } else {
             // srai
-            self.gregs[inst_rd(_inst)] = ((self.gregs[inst_rs1(_inst)] as i32).wrapping_shr(imm & 0b11111)) as u32;
+            self.gregs[inst_rd(_inst)] =
+                ((self.gregs[inst_rs1(_inst)] as i32).wrapping_shr(imm & 0b11111)) as u32;
         }
         self.do_dispatch(_pc.next())
     }
@@ -454,20 +461,21 @@ impl<H: Host> Machine<H> {
     }
     fn i_sll_mulh(&mut self, _pc: AlignedPC, _inst: u32) {
         let funct7 = inst_r_funct7(_inst);
-        
+
         if unlikely(funct7 != 0) {
             if likely(funct7 == 1) {
                 return self.i_mulh(_pc, _inst);
             }
             H::raise_exception(self, _pc.into(), Exception::InvalidOpcode);
         }
-        
-        self.gregs[inst_rd(_inst)] = self.gregs[inst_rs1(_inst)].wrapping_shl(self.gregs[inst_rs2(_inst)] & 0b11111);
+
+        self.gregs[inst_rd(_inst)] =
+            self.gregs[inst_rs1(_inst)].wrapping_shl(self.gregs[inst_rs2(_inst)] & 0b11111);
         self.do_dispatch(_pc.next())
     }
     fn i_slt_mulhsu(&mut self, _pc: AlignedPC, _inst: u32) {
         let funct7 = inst_r_funct7(_inst);
-        
+
         if unlikely(funct7 != 0) {
             if likely(funct7 == 1) {
                 return self.i_mulhsu(_pc, _inst);
@@ -484,7 +492,7 @@ impl<H: Host> Machine<H> {
     }
     fn i_sltu_mulhu(&mut self, _pc: AlignedPC, _inst: u32) {
         let funct7 = inst_r_funct7(_inst);
-        
+
         if unlikely(funct7 != 0) {
             if likely(funct7 == 1) {
                 return self.i_mulhu(_pc, _inst);
@@ -583,38 +591,55 @@ impl<H: Host> Machine<H> {
         self.do_dispatch(_pc.next())
     }
     fn i_mulh(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = ((((self.gregs[inst_rs1(_inst)] as i32 as i64) * (self.gregs[inst_rs2(_inst)] as i32 as i64)) as u64) >> 32) as u32;
+        self.gregs[inst_rd(_inst)] = ((((self.gregs[inst_rs1(_inst)] as i32 as i64)
+            * (self.gregs[inst_rs2(_inst)] as i32 as i64))
+            as u64)
+            >> 32) as u32;
         self.do_dispatch(_pc.next())
     }
     fn i_mulhsu(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = ((((self.gregs[inst_rs1(_inst)] as i32 as i64) * (self.gregs[inst_rs2(_inst)] as u32 as i64)) as u64) >> 32) as u32;
+        self.gregs[inst_rd(_inst)] = ((((self.gregs[inst_rs1(_inst)] as i32 as i64)
+            * (self.gregs[inst_rs2(_inst)] as u32 as i64))
+            as u64)
+            >> 32) as u32;
         self.do_dispatch(_pc.next())
     }
     fn i_mulhu(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = ((((self.gregs[inst_rs1(_inst)] as u32 as i64) * (self.gregs[inst_rs2(_inst)] as u32 as i64)) as u64) >> 32) as u32;
+        self.gregs[inst_rd(_inst)] = ((((self.gregs[inst_rs1(_inst)] as u32 as i64)
+            * (self.gregs[inst_rs2(_inst)] as u32 as i64))
+            as u64)
+            >> 32) as u32;
         self.do_dispatch(_pc.next())
     }
     fn i_div(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = unchecked_div_i32(self.gregs[inst_rs1(_inst)] as i32, self.gregs[inst_rs2(_inst)] as i32) as u32;
+        self.gregs[inst_rd(_inst)] = unchecked_div_i32(
+            self.gregs[inst_rs1(_inst)] as i32,
+            self.gregs[inst_rs2(_inst)] as i32,
+        ) as u32;
         self.do_dispatch(_pc.next())
     }
     fn i_divu(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = unchecked_div_u32(self.gregs[inst_rs1(_inst)], self.gregs[inst_rs2(_inst)]);
+        self.gregs[inst_rd(_inst)] =
+            unchecked_div_u32(self.gregs[inst_rs1(_inst)], self.gregs[inst_rs2(_inst)]);
         self.do_dispatch(_pc.next())
     }
     fn i_rem(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = unchecked_rem_i32(self.gregs[inst_rs1(_inst)] as i32, self.gregs[inst_rs2(_inst)] as i32) as u32;
+        self.gregs[inst_rd(_inst)] = unchecked_rem_i32(
+            self.gregs[inst_rs1(_inst)] as i32,
+            self.gregs[inst_rs2(_inst)] as i32,
+        ) as u32;
         self.do_dispatch(_pc.next())
     }
     fn i_remu(&mut self, _pc: AlignedPC, _inst: u32) {
-        self.gregs[inst_rd(_inst)] = unchecked_rem_u32(self.gregs[inst_rs1(_inst)], self.gregs[inst_rs2(_inst)]);
+        self.gregs[inst_rd(_inst)] =
+            unchecked_rem_u32(self.gregs[inst_rs1(_inst)], self.gregs[inst_rs2(_inst)]);
         self.do_dispatch(_pc.next())
     }
 
     #[cfg(feature = "ext-a")]
     fn i_amo_32(&mut self, _pc: AlignedPC, _inst: u32) {
-        use core::sync::atomic::{AtomicU32, AtomicI32};
-        
+        use core::sync::atomic::{AtomicI32, AtomicU32};
+
         let funct7 = inst_r_funct7(_inst);
         let func = funct7 >> 2;
 
@@ -624,12 +649,11 @@ impl<H: Host> Machine<H> {
             0b01 => Ordering::Release,
             0b10 => Ordering::Acquire,
             0b11 => Ordering::SeqCst,
-            _ => unreachable!()
+            _ => unreachable!(),
         };
-        
-        let memref = unsafe {
-            &*(self.translate_ptr(_pc, self.gregs[inst_rs1(_inst)]) as *mut AtomicU32)
-        };
+
+        let memref =
+            unsafe { &*(self.translate_ptr(_pc, self.gregs[inst_rs1(_inst)]) as *mut AtomicU32) };
         let rs2 = self.gregs[inst_rs2(_inst)];
         let rd = &mut self.gregs[inst_rd(_inst)];
         match func {
@@ -637,7 +661,7 @@ impl<H: Host> Machine<H> {
                 // LR.W
                 self.deny_lr_sc(_pc);
                 let rd = &mut self.gregs[inst_rd(_inst)];
-                
+
                 let (value, ok) = crate::exec_arch::atomic_lr(memref);
 
                 self.lr_sc = true;
@@ -676,15 +700,13 @@ impl<H: Host> Machine<H> {
             }
             0b10000 => {
                 // AMOMIN.W
-                *rd = unsafe {
-                    core::mem::transmute::<&AtomicU32, &AtomicI32>(memref)
-                }.fetch_min(rs2 as i32, ordering) as u32;
+                *rd = unsafe { core::mem::transmute::<&AtomicU32, &AtomicI32>(memref) }
+                    .fetch_min(rs2 as i32, ordering) as u32;
             }
             0b10100 => {
                 // AMOMAX.W
-                *rd = unsafe {
-                    core::mem::transmute::<&AtomicU32, &AtomicI32>(memref)
-                }.fetch_max(rs2 as i32, ordering) as u32;
+                *rd = unsafe { core::mem::transmute::<&AtomicU32, &AtomicI32>(memref) }
+                    .fetch_max(rs2 as i32, ordering) as u32;
             }
             0b11000 => {
                 // AMOMINU.W
@@ -710,8 +732,7 @@ impl<H: Host> Machine<H> {
 
     #[inline(always)]
     #[cfg(not(feature = "ext-a"))]
-    fn deny_lr_sc(&mut self, _pc: AlignedPC) {
-    }
+    fn deny_lr_sc(&mut self, _pc: AlignedPC) {}
 
     #[inline(always)]
     unsafe fn translate_ptr<T>(&mut self, _pc: AlignedPC, ptr: u32) -> *mut T {
@@ -723,44 +744,32 @@ impl<H: Host> Machine<H> {
 
     #[inline(always)]
     fn mem_load_32(&mut self, _pc: AlignedPC, ptr: u32) -> u32 {
-        unsafe {
-            core::ptr::read_volatile(self.translate_ptr::<u32>(_pc, ptr))
-        }
+        unsafe { core::ptr::read_volatile(self.translate_ptr::<u32>(_pc, ptr)) }
     }
 
     #[inline(always)]
     fn mem_store_32(&mut self, _pc: AlignedPC, ptr: u32, val: u32) {
-        unsafe {
-            core::ptr::write_volatile(self.translate_ptr::<u32>(_pc, ptr), val)
-        }
+        unsafe { core::ptr::write_volatile(self.translate_ptr::<u32>(_pc, ptr), val) }
     }
 
     #[inline(always)]
     fn mem_load_16(&mut self, _pc: AlignedPC, ptr: u32) -> u16 {
-        unsafe {
-            core::ptr::read_volatile(self.translate_ptr::<u16>(_pc, ptr))
-        }
+        unsafe { core::ptr::read_volatile(self.translate_ptr::<u16>(_pc, ptr)) }
     }
 
     #[inline(always)]
     fn mem_store_16(&mut self, _pc: AlignedPC, ptr: u32, val: u16) {
-        unsafe {
-            core::ptr::write_volatile(self.translate_ptr::<u16>(_pc, ptr), val)
-        }
+        unsafe { core::ptr::write_volatile(self.translate_ptr::<u16>(_pc, ptr), val) }
     }
 
     #[inline(always)]
     fn mem_load_8(&mut self, _pc: AlignedPC, ptr: u32) -> u8 {
-        unsafe {
-            core::ptr::read_volatile(self.translate_ptr::<u8>(_pc, ptr))
-        }
+        unsafe { core::ptr::read_volatile(self.translate_ptr::<u8>(_pc, ptr)) }
     }
 
     #[inline(always)]
     fn mem_store_8(&mut self, _pc: AlignedPC, ptr: u32, val: u8) {
-        unsafe {
-            core::ptr::write_volatile(self.translate_ptr::<u8>(_pc, ptr), val)
-        }
+        unsafe { core::ptr::write_volatile(self.translate_ptr::<u8>(_pc, ptr), val) }
     }
 }
 
@@ -796,12 +805,18 @@ fn inst_i_imm(inst: u32) -> u32 {
 
 #[inline(always)]
 fn inst_b_imm(inst: u32) -> u32 {
-    (((inst >> 8) & 0b1111) << 1) | (((inst >> 7) & 0b1) << 11) | (((inst >> 25) & 0b111111) << 5) | (((inst >> 31) & 0b1) << 12)
+    (((inst >> 8) & 0b1111) << 1)
+        | (((inst >> 7) & 0b1) << 11)
+        | (((inst >> 25) & 0b111111) << 5)
+        | (((inst >> 31) & 0b1) << 12)
 }
 
 #[inline(always)]
 fn inst_j_imm(inst: u32) -> u32 {
-    (((inst >> 12) & 0b11111111) << 12) | (((inst >> 20) & 0b1) << 11) | (((inst >> 21) & 0b1111111111) << 1) | (((inst >> 31) & 0b1) << 20)
+    (((inst >> 12) & 0b11111111) << 12)
+        | (((inst >> 20) & 0b1) << 11)
+        | (((inst >> 21) & 0b1111111111) << 1)
+        | (((inst >> 31) & 0b1) << 20)
 }
 
 #[inline(always)]
@@ -838,28 +853,20 @@ fn sext21b(src: u32) -> u32 {
 
 #[inline(always)]
 fn unchecked_div_u32(a: u32, b: u32) -> u32 {
-    unsafe {
-        core::intrinsics::unchecked_div(a, b)
-    }
+    unsafe { core::intrinsics::unchecked_div(a, b) }
 }
 
 #[inline(always)]
 fn unchecked_div_i32(a: i32, b: i32) -> i32 {
-    unsafe {
-        core::intrinsics::unchecked_div(a, b)
-    }
+    unsafe { core::intrinsics::unchecked_div(a, b) }
 }
 
 #[inline(always)]
 fn unchecked_rem_u32(a: u32, b: u32) -> u32 {
-    unsafe {
-        core::intrinsics::unchecked_rem(a, b)
-    }
+    unsafe { core::intrinsics::unchecked_rem(a, b) }
 }
 
 #[inline(always)]
 fn unchecked_rem_i32(a: i32, b: i32) -> i32 {
-    unsafe {
-        core::intrinsics::unchecked_rem(a, b)
-    }
+    unsafe { core::intrinsics::unchecked_rem(a, b) }
 }

@@ -1,8 +1,8 @@
+use core::ops::Range;
 use goblin::elf::{
     header::header32::Header, program_header::program_header32::ProgramHeader, program_header::*,
 };
 use spin::Mutex;
-use core::ops::Range;
 
 /// Segment is executable.
 const PF_X: u32 = 1 << 0;
@@ -58,7 +58,11 @@ pub trait MemoryManager {
     unsafe fn mprotect(&mut self, start: usize, len: usize, prot: SegmentProtection) -> bool;
 }
 
-pub unsafe fn load<M: MemoryManager>(image: &[u8], va_space: Range<usize>, mm: &mut M) -> Option<ElfMetadata> {
+pub unsafe fn load<M: MemoryManager>(
+    image: &[u8],
+    va_space: Range<usize>,
+    mm: &mut M,
+) -> Option<ElfMetadata> {
     let header: Header = match image.read_raw() {
         Some(x) => x,
         None => return None,
@@ -106,16 +110,19 @@ pub unsafe fn load<M: MemoryManager>(image: &[u8], va_space: Range<usize>, mm: &
             return None;
         }
 
-        if !mm.mmap(va_begin, va_end - va_begin, SegmentProtection::R | SegmentProtection::W) {
+        if !mm.mmap(
+            va_begin,
+            va_end - va_begin,
+            SegmentProtection::R | SegmentProtection::W,
+        ) {
             return None;
         }
 
-        let slice = core::slice::from_raw_parts_mut(
-            va_begin as *mut u8,
-            va_end - va_begin,
-        );
+        let slice = core::slice::from_raw_parts_mut(va_begin as *mut u8, va_end - va_begin);
 
-        slice[padding_before..padding_before + (ph.p_filesz as usize)].copy_from_slice(&image[(ph.p_offset as usize)..((ph.p_offset as usize) + (ph.p_filesz as usize))]);
+        slice[padding_before..padding_before + (ph.p_filesz as usize)].copy_from_slice(
+            &image[(ph.p_offset as usize)..((ph.p_offset as usize) + (ph.p_filesz as usize))],
+        );
         if !mm.mprotect(va_begin, va_end - va_begin, prot) {
             return None;
         }

@@ -1,13 +1,13 @@
 extern crate flatrv;
 
-use flatrv::exec::{Machine, Host, Exception, GlobalContext, Extension, LowerAddressSpaceToken, EcallOutput};
 use flatrv::elf;
-use nix::sys::mman::{mmap, mprotect, ProtFlags, MapFlags};
-use std::{fs::File, env, io::Read};
+use flatrv::exec::{
+    EcallOutput, Exception, Extension, GlobalContext, Host, LowerAddressSpaceToken, Machine,
+};
+use nix::sys::mman::{mmap, mprotect, MapFlags, ProtFlags};
+use std::{env, fs::File, io::Read};
 
-struct TestHost {
-
-}
+struct TestHost {}
 
 impl Host for TestHost {
     #[inline(never)]
@@ -16,7 +16,12 @@ impl Host for TestHost {
     }
     #[inline(never)]
     fn ecall(m: &mut Machine<Self>, pc: u32) -> EcallOutput {
-        let gregs: Vec<String> = m.gregs.iter().enumerate().map(|(i, x)| format!("\t{}: {:08x}", i, x)).collect();
+        let gregs: Vec<String> = m
+            .gregs
+            .iter()
+            .enumerate()
+            .map(|(i, x)| format!("\t{}: {:08x}", i, x))
+            .collect();
         println!("ecall @ {:08x}: \n{}", pc, gregs.join("\n"));
         EcallOutput::default()
     }
@@ -33,9 +38,7 @@ impl Host for TestHost {
     }
 }
 
-struct OsMemoryManager {
-
-}
+struct OsMemoryManager {}
 
 impl elf::MemoryManager for OsMemoryManager {
     unsafe fn mmap(&mut self, start: usize, len: usize, prot: elf::SegmentProtection) -> bool {
@@ -52,10 +55,10 @@ impl elf::MemoryManager for OsMemoryManager {
             prot_flags,
             MapFlags::MAP_PRIVATE | MapFlags::MAP_ANON | MapFlags::MAP_FIXED,
             -1,
-            0
+            0,
         ) {
             Ok(_) => true,
-            Err(_) => false
+            Err(_) => false,
         }
     }
     unsafe fn mprotect(&mut self, start: usize, len: usize, prot: elf::SegmentProtection) -> bool {
@@ -66,13 +69,9 @@ impl elf::MemoryManager for OsMemoryManager {
         if prot.contains(elf::SegmentProtection::X) {
             prot_flags |= ProtFlags::PROT_EXEC;
         }
-        match mprotect(
-            start as *mut _,
-            len as _,
-            prot_flags
-        ) {
+        match mprotect(start as *mut _, len as _, prot_flags) {
             Ok(_) => true,
-            Err(_) => false
+            Err(_) => false,
         }
     }
 }
@@ -84,14 +83,14 @@ fn main() {
         let mut data: Vec<u8> = Vec::new();
         f.read_to_end(&mut data).expect("Cannot read image");
         unsafe {
-            elf::load(&data, 0..0x100000, &mut OsMemoryManager {}).expect("Cannot load ELF").entry_address
+            elf::load(&data, 0..0x100000, &mut OsMemoryManager {})
+                .expect("Cannot load ELF")
+                .entry_address
         }
     };
 
     let mut machine = Machine::new(TestHost {});
-    let token = unsafe {
-        LowerAddressSpaceToken::new()
-    };
+    let token = unsafe { LowerAddressSpaceToken::new() };
     machine.run(start_address, &token);
     println!("{:?}", machine.gregs);
 }
