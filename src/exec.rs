@@ -15,8 +15,18 @@ pub struct GlobalContext<H: Host> {
 /// Machine state.
 pub struct Machine<H: Host> {
     pub gregs: [u32; 32],
+    #[cfg(feature = "ext-a")]
+    lr_sc: bool,
+    #[cfg(feature = "ext-a")]
+    lr_sc_failed: bool,
     pub host: H,
     lut: &'static OpcodeLut<H>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Extension {
+    #[cfg(feature = "ext-a")]
+    A,
 }
 
 /// Host bindings.
@@ -33,6 +43,9 @@ pub trait Host: Sized + 'static {
 
     #[inline(always)]
     fn mem_address_limit(_m: &mut Machine<Self>) -> u32 { core::u32::MAX }
+
+    #[inline(always)]
+    fn extension_enabled(_ext: Extension) -> bool { false }
 }
 
 /// Result from ecall.
@@ -55,6 +68,7 @@ pub enum Exception {
     InvalidOpcode,
     InvalidMemoryReference,
     InstructionAddressMisaligned,
+    InvalidLrscSequence,
     Ebreak,
     Wfi,
 }
@@ -177,6 +191,14 @@ impl<H: Host> OpcodeLut<H> {
         opcode_funct3[0b0001111_000] = Some(Machine::i_fence);
         opcode_funct3[0b1110011_000] = Some(Machine::i_ecallbreak);
 
+        #[cfg(feature = "ext-a")] {
+            if H::extension_enabled(Extension::A) {
+                if crate::exec_arch::atomic_is_supported() {
+                    opcode_funct3[0b0101111_010] = Some(Machine::i_amo_32);
+                }
+            }
+        }
+
         // Replace nulls with -1.
         //
         // This is required because address 0 is controlled by user code and is unsafe to dereference
@@ -204,6 +226,10 @@ impl<H: Host> Machine<H> {
         let ctx = H::global_context();
         Machine {
             gregs: [0u32; 32],
+            #[cfg(feature = "ext-a")]
+            lr_sc: false,
+            #[cfg(feature = "ext-a")]
+            lr_sc_failed: false,
             lut: ctx.lut.call_once(OpcodeLut::new),
             host,
         }
@@ -306,48 +332,56 @@ impl<H: Host> Machine<H> {
         }
     }
     fn i_lb(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_8(_pc, base + offset) as i8 as i32 as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_lh(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_16(_pc, base + offset) as i16 as i32 as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_lw(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_32(_pc, base + offset);
         self.do_dispatch(_pc.next()) 
     }
     fn i_lbu(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_8(_pc, base + offset) as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_lhu(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_i_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.gregs[inst_rd(_inst)] = self.mem_load_16(_pc, base + offset) as u32;
         self.do_dispatch(_pc.next()) 
     }
     fn i_sb(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.mem_store_8(_pc, base + offset, self.gregs[inst_rs2(_inst)] as u8);
         self.do_dispatch(_pc.next()) 
     }
     fn i_sh(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.mem_store_16(_pc, base + offset, self.gregs[inst_rs2(_inst)] as u16);
         self.do_dispatch(_pc.next()) 
     }
     fn i_sw(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let offset = sext12b(inst_s_imm(_inst));
         let base = self.gregs[inst_rs1(_inst)];
         self.mem_store_32(_pc, base + offset, self.gregs[inst_rs2(_inst)]);
@@ -525,6 +559,7 @@ impl<H: Host> Machine<H> {
         self.do_dispatch(_pc.next())
     }
     fn i_ecallbreak(&mut self, _pc: AlignedPC, _inst: u32) {
+        self.deny_lr_sc(_pc);
         let func = inst_i_imm(_inst);
         if likely(func == 0) {
             let output = H::ecall(self, u32::from(_pc.next()));
@@ -574,6 +609,108 @@ impl<H: Host> Machine<H> {
     fn i_remu(&mut self, _pc: AlignedPC, _inst: u32) {
         self.gregs[inst_rd(_inst)] = unchecked_rem_u32(self.gregs[inst_rs1(_inst)], self.gregs[inst_rs2(_inst)]);
         self.do_dispatch(_pc.next())
+    }
+
+    #[cfg(feature = "ext-a")]
+    fn i_amo_32(&mut self, _pc: AlignedPC, _inst: u32) {
+        use core::sync::atomic::{AtomicU32, AtomicI32};
+        
+        let funct7 = inst_r_funct7(_inst);
+        let func = funct7 >> 2;
+
+        // All orderings are supported by all possible Rust-native atomic operations used here.
+        let ordering = match funct7 & 0b11 {
+            0b00 => Ordering::Relaxed,
+            0b01 => Ordering::Release,
+            0b10 => Ordering::Acquire,
+            0b11 => Ordering::SeqCst,
+            _ => unreachable!()
+        };
+        
+        let memref = unsafe {
+            &*(self.translate_ptr(_pc, self.gregs[inst_rs1(_inst)]) as *mut AtomicU32)
+        };
+        let rs2 = self.gregs[inst_rs2(_inst)];
+        let rd = &mut self.gregs[inst_rd(_inst)];
+        match func {
+            0b00010 => {
+                // LR.W
+                self.deny_lr_sc(_pc);
+                let rd = &mut self.gregs[inst_rd(_inst)];
+                
+                let (value, ok) = crate::exec_arch::atomic_lr(memref);
+
+                self.lr_sc = true;
+                self.lr_sc_failed = !ok;
+                *rd = value;
+            }
+            0b00011 => {
+                // SC.W
+                if self.lr_sc && !self.lr_sc_failed {
+                    crate::exec_arch::atomic_sc(memref, rs2);
+                    *rd = 0;
+                } else {
+                    *rd = 1;
+                }
+                self.lr_sc = false;
+            }
+            0b00001 => {
+                // AMOSWAP.W
+                *rd = memref.swap(rs2, ordering);
+            }
+            0b00000 => {
+                // AMOADD.W
+                *rd = memref.fetch_add(rs2, ordering);
+            }
+            0b00100 => {
+                // AMOXOR.W
+                *rd = memref.fetch_xor(rs2, ordering);
+            }
+            0b01100 => {
+                // AMOAND.W
+                *rd = memref.fetch_and(rs2, ordering);
+            }
+            0b01000 => {
+                // AMOOR.w
+                *rd = memref.fetch_or(rs2, ordering);
+            }
+            0b10000 => {
+                // AMOMIN.W
+                *rd = unsafe {
+                    core::mem::transmute::<&AtomicU32, &AtomicI32>(memref)
+                }.fetch_min(rs2 as i32, ordering) as u32;
+            }
+            0b10100 => {
+                // AMOMAX.W
+                *rd = unsafe {
+                    core::mem::transmute::<&AtomicU32, &AtomicI32>(memref)
+                }.fetch_max(rs2 as i32, ordering) as u32;
+            }
+            0b11000 => {
+                // AMOMINU.W
+                *rd = memref.fetch_min(rs2, ordering);
+            }
+            0b11100 => {
+                // AMOMAXU.W
+                *rd = memref.fetch_max(rs2, ordering);
+            }
+            _ => H::raise_exception(self, _pc.into(), Exception::InvalidOpcode),
+        }
+
+        self.do_dispatch(_pc.next())
+    }
+
+    #[inline(always)]
+    #[cfg(feature = "ext-a")]
+    fn deny_lr_sc(&mut self, _pc: AlignedPC) {
+        if unlikely(self.lr_sc) {
+            H::raise_exception(self, _pc.into(), Exception::InvalidLrscSequence);
+        }
+    }
+
+    #[inline(always)]
+    #[cfg(not(feature = "ext-a"))]
+    fn deny_lr_sc(&mut self, _pc: AlignedPC) {
     }
 
     #[inline(always)]

@@ -1,6 +1,6 @@
 extern crate flatrv;
 
-use flatrv::exec::{Machine, Host, Exception, GlobalContext, LowerAddressSpaceToken, EcallOutput};
+use flatrv::exec::{Machine, Host, Exception, GlobalContext, Extension, LowerAddressSpaceToken, EcallOutput};
 use flatrv::elf;
 use nix::sys::mman::{mmap, mprotect, ProtFlags, MapFlags};
 use std::{fs::File, env, io::Read};
@@ -11,7 +11,7 @@ struct TestHost {
 
 impl Host for TestHost {
     #[inline(never)]
-    fn raise_exception(m: &mut Machine<Self>, pc: u32, exc: Exception) -> ! {
+    fn raise_exception(_m: &mut Machine<Self>, pc: u32, exc: Exception) -> ! {
         panic!("Exception: pc = {:08x}, exc = {:?}", pc, exc);
     }
     #[inline(never)]
@@ -23,6 +23,13 @@ impl Host for TestHost {
     fn global_context() -> &'static GlobalContext<Self> {
         static GC: GlobalContext<TestHost> = GlobalContext::new();
         &GC
+    }
+
+    #[inline(always)]
+    fn extension_enabled(ext: Extension) -> bool {
+        match ext {
+            Extension::A => true,
+        }
     }
 }
 
