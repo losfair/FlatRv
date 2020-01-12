@@ -5,6 +5,7 @@ use core::intrinsics::{likely, unlikely};
 use core::marker::PhantomData;
 use core::sync::atomic::Ordering;
 use spin::Once;
+use core::mem::MaybeUninit;
 
 const OPCODE_LUT_SIZE: usize = 1 << 10;
 
@@ -154,74 +155,73 @@ impl<H: Host> GlobalContext<H> {
 impl<H: Host> OpcodeLut<H> {
     /// Builds an opcode lookup table.
     fn new() -> OpcodeLut<H> {
-        let mut opcode_funct3: [Option<OpcodeHandler<H>>; OPCODE_LUT_SIZE] =
-            [None; OPCODE_LUT_SIZE];
+        let mut ret = OpcodeLut {
+            opcode_funct3: unsafe {
+                MaybeUninit::uninit().assume_init()
+            },
+        };
 
-        for i in 0..=0b111 {
-            opcode_funct3[(0b0110111 << 3) + i] = Some(Machine::i_lui);
-            opcode_funct3[(0b0010111 << 3) + i] = Some(Machine::i_auipc);
-            opcode_funct3[(0b1101111 << 3) + i] = Some(Machine::i_jal);
+        // Use -1 as the "null pointer".
+        //
+        // This is required because address 0 is controlled by user code and is unsafe to dereference.
+        unsafe {
+            for elem in (*(&mut ret.opcode_funct3 as *mut [OpcodeHandler<H>; OPCODE_LUT_SIZE] as *mut [usize; OPCODE_LUT_SIZE])).iter_mut() {
+                *elem = core::usize::MAX;
+            }
         }
 
-        opcode_funct3[0b1100111_000] = Some(Machine::i_jalr);
-        opcode_funct3[0b1100011_000] = Some(Machine::i_beq);
-        opcode_funct3[0b1100011_001] = Some(Machine::i_bne);
-        opcode_funct3[0b1100011_100] = Some(Machine::i_blt);
-        opcode_funct3[0b1100011_101] = Some(Machine::i_bge);
-        opcode_funct3[0b1100011_110] = Some(Machine::i_bltu);
-        opcode_funct3[0b1100011_111] = Some(Machine::i_bgeu);
-        opcode_funct3[0b0000011_000] = Some(Machine::i_lb);
-        opcode_funct3[0b0000011_001] = Some(Machine::i_lh);
-        opcode_funct3[0b0000011_010] = Some(Machine::i_lw);
-        opcode_funct3[0b0000011_100] = Some(Machine::i_lbu);
-        opcode_funct3[0b0000011_101] = Some(Machine::i_lhu);
-        opcode_funct3[0b0100011_000] = Some(Machine::i_sb);
-        opcode_funct3[0b0100011_001] = Some(Machine::i_sh);
-        opcode_funct3[0b0100011_010] = Some(Machine::i_sw);
-        opcode_funct3[0b0010011_000] = Some(Machine::i_addi);
-        opcode_funct3[0b0010011_010] = Some(Machine::i_slti);
-        opcode_funct3[0b0010011_011] = Some(Machine::i_sltiu);
-        opcode_funct3[0b0010011_100] = Some(Machine::i_xori);
-        opcode_funct3[0b0010011_110] = Some(Machine::i_ori);
-        opcode_funct3[0b0010011_111] = Some(Machine::i_andi);
-        opcode_funct3[0b0010011_001] = Some(Machine::i_slli);
-        opcode_funct3[0b0010011_101] = Some(Machine::i_srli_srai);
-        opcode_funct3[0b0110011_000] = Some(Machine::i_add_sub_mul);
-        opcode_funct3[0b0110011_001] = Some(Machine::i_sll_mulh);
-        opcode_funct3[0b0110011_010] = Some(Machine::i_slt_mulhsu);
-        opcode_funct3[0b0110011_011] = Some(Machine::i_sltu_mulhu);
-        opcode_funct3[0b0110011_100] = Some(Machine::i_xor_div);
-        opcode_funct3[0b0110011_101] = Some(Machine::i_srl_sra_divu);
-        opcode_funct3[0b0110011_110] = Some(Machine::i_or_rem);
-        opcode_funct3[0b0110011_111] = Some(Machine::i_and_remu);
-        opcode_funct3[0b0001111_000] = Some(Machine::i_fence);
-        opcode_funct3[0b1110011_000] = Some(Machine::i_ecallbreak);
+        let opcode_funct3 = &mut ret.opcode_funct3;
+
+        for i in 0..=0b111 {
+            opcode_funct3[(0b0110111 << 3) + i] = Machine::i_lui;
+            opcode_funct3[(0b0010111 << 3) + i] = Machine::i_auipc;
+            opcode_funct3[(0b1101111 << 3) + i] = Machine::i_jal;
+        }
+
+        opcode_funct3[0b1100111_000] = Machine::i_jalr;
+        opcode_funct3[0b1100011_000] = Machine::i_beq;
+        opcode_funct3[0b1100011_001] = Machine::i_bne;
+        opcode_funct3[0b1100011_100] = Machine::i_blt;
+        opcode_funct3[0b1100011_101] = Machine::i_bge;
+        opcode_funct3[0b1100011_110] = Machine::i_bltu;
+        opcode_funct3[0b1100011_111] = Machine::i_bgeu;
+        opcode_funct3[0b0000011_000] = Machine::i_lb;
+        opcode_funct3[0b0000011_001] = Machine::i_lh;
+        opcode_funct3[0b0000011_010] = Machine::i_lw;
+        opcode_funct3[0b0000011_100] = Machine::i_lbu;
+        opcode_funct3[0b0000011_101] = Machine::i_lhu;
+        opcode_funct3[0b0100011_000] = Machine::i_sb;
+        opcode_funct3[0b0100011_001] = Machine::i_sh;
+        opcode_funct3[0b0100011_010] = Machine::i_sw;
+        opcode_funct3[0b0010011_000] = Machine::i_addi;
+        opcode_funct3[0b0010011_010] = Machine::i_slti;
+        opcode_funct3[0b0010011_011] = Machine::i_sltiu;
+        opcode_funct3[0b0010011_100] = Machine::i_xori;
+        opcode_funct3[0b0010011_110] = Machine::i_ori;
+        opcode_funct3[0b0010011_111] = Machine::i_andi;
+        opcode_funct3[0b0010011_001] = Machine::i_slli;
+        opcode_funct3[0b0010011_101] = Machine::i_srli_srai;
+        opcode_funct3[0b0110011_000] = Machine::i_add_sub_mul;
+        opcode_funct3[0b0110011_001] = Machine::i_sll_mulh;
+        opcode_funct3[0b0110011_010] = Machine::i_slt_mulhsu;
+        opcode_funct3[0b0110011_011] = Machine::i_sltu_mulhu;
+        opcode_funct3[0b0110011_100] = Machine::i_xor_div;
+        opcode_funct3[0b0110011_101] = Machine::i_srl_sra_divu;
+        opcode_funct3[0b0110011_110] = Machine::i_or_rem;
+        opcode_funct3[0b0110011_111] = Machine::i_and_remu;
+        opcode_funct3[0b0001111_000] = Machine::i_fence;
+        opcode_funct3[0b1110011_000] = Machine::i_ecallbreak;
 
         #[cfg(feature = "ext-a")]
         {
             if H::extension_enabled(Extension::A) {
                 if crate::exec_arch::atomic_is_supported() {
-                    opcode_funct3[0b0101111_010] = Some(Machine::i_amo_32);
+                    opcode_funct3[0b0101111_010] = Machine::i_amo_32;
                 }
             }
         }
 
-        // Replace nulls with -1.
-        //
-        // This is required because address 0 is controlled by user code and is unsafe to dereference
-        // as a "null pointer".
-        let opcode_funct3 = unsafe {
-            use core::mem::transmute;
-            let mut as_usize = transmute::<_, [usize; OPCODE_LUT_SIZE]>(opcode_funct3);
-            for f in as_usize.iter_mut() {
-                if *f == 0 {
-                    *f = core::usize::MAX;
-                }
-            }
-            transmute::<_, [OpcodeHandler<H>; OPCODE_LUT_SIZE]>(as_usize)
-        };
-
-        OpcodeLut { opcode_funct3 }
+        ret
     }
 }
 
