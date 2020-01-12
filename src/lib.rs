@@ -9,6 +9,10 @@ pub mod exec;
 #[path = "exec_x86_64.rs"]
 mod exec_arch;
 
+#[cfg(not(target_arch = "x86_64"))]
+#[path = "exec_generic.rs"]
+mod exec_arch;
+
 #[cfg(debug_assertions)]
 fn no_debug() {
     compile_error!("flatrv depends on release mode for correctness");

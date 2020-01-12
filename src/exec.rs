@@ -20,6 +20,8 @@ pub struct Machine<H: Host> {
     lr_sc: bool,
     #[cfg(feature = "ext-a")]
     lr_sc_failed: bool,
+    #[cfg(feature = "ext-a")]
+    cmpxchg_lr_sc_reserve: u32,
     pub host: H,
     lut: &'static OpcodeLut<H>,
 }
@@ -93,6 +95,25 @@ pub struct LowerAddressSpaceToken(PhantomData<()>);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct AlignedPC {
     _unsafe_inner: u32,
+}
+
+#[allow(dead_code)]
+trait BooleanFlag {
+    fn value() -> bool;
+}
+
+#[allow(dead_code)]
+struct True;
+impl BooleanFlag for True {
+    #[inline(always)]
+    fn value() -> bool { true }
+}
+
+#[allow(dead_code)]
+struct False;
+impl BooleanFlag for False {
+    #[inline(always)]
+    fn value() -> bool { false }
 }
 
 impl AlignedPC {
@@ -216,7 +237,9 @@ impl<H: Host> OpcodeLut<H> {
         {
             if H::extension_enabled(Extension::A) {
                 if crate::exec_arch::atomic_is_supported() {
-                    opcode_funct3[0b0101111_010] = Machine::i_amo_32;
+                    opcode_funct3[0b0101111_010] = Machine::i_amo_32::<True>;
+                } else {
+                    opcode_funct3[0b0101111_010] = Machine::i_amo_32::<False>;
                 }
             }
         }
@@ -235,6 +258,8 @@ impl<H: Host> Machine<H> {
             lr_sc: false,
             #[cfg(feature = "ext-a")]
             lr_sc_failed: false,
+            #[cfg(feature = "ext-a")]
+            cmpxchg_lr_sc_reserve: 0,
             lut: ctx.lut.call_once(OpcodeLut::new),
             host,
         }
@@ -638,7 +663,7 @@ impl<H: Host> Machine<H> {
     }
 
     #[cfg(feature = "ext-a")]
-    fn i_amo_32(&mut self, _pc: AlignedPC, _inst: u32) {
+    fn i_amo_32<ArchHasLrSc: BooleanFlag>(&mut self, _pc: AlignedPC, _inst: u32) {
         use core::sync::atomic::{AtomicI32, AtomicU32};
 
         let funct7 = inst_r_funct7(_inst);
@@ -667,18 +692,32 @@ impl<H: Host> Machine<H> {
                 self.deny_lr_sc(_pc);
                 let rd = &mut self.gregs[inst_rd(_inst)];
 
-                let (value, ok) = crate::exec_arch::atomic_lr(memref);
+                if ArchHasLrSc::value() {
+                    let (value, ok) = crate::exec_arch::atomic_lr(memref);
+                    self.lr_sc_failed = !ok;
+                    *rd = value;
+                } else {
+                    let value = memref.load(Ordering::Relaxed);
+                    self.cmpxchg_lr_sc_reserve = value;
+                    *rd = value;
+                }
 
                 self.lr_sc = true;
-                self.lr_sc_failed = !ok;
-                *rd = value;
             }
             0b00011 => {
                 // SC.W
-                if self.lr_sc && !self.lr_sc_failed && crate::exec_arch::atomic_sc(memref, rs2) {
-                    *rd = 0;
+                if ArchHasLrSc::value() {
+                    if self.lr_sc && !self.lr_sc_failed && crate::exec_arch::atomic_sc(memref, rs2) {
+                        *rd = 0;
+                    } else {
+                        *rd = 1;
+                    }
                 } else {
-                    *rd = 1;
+                    if memref.compare_exchange(self.cmpxchg_lr_sc_reserve, rs2, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                        *rd = 0;
+                    } else {
+                        *rd = 1;
+                    }
                 }
                 self.lr_sc = false;
             }
