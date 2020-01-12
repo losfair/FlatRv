@@ -1,6 +1,6 @@
 # FlatRv
 
-A cross-platform [RISC-V](https://riscv.org/) interpreter that implements the RV32IM instruction set.
+A cross-platform [RISC-V](https://riscv.org/) interpreter that implements the RV32IMA instruction set.
 
 Inspired by [wasm3](https://github.com/wasm3/wasm3), FlatRv depends on compiler optimizations to convert tail calls into one single
 indirect branch, therefore preserving Rust's safety guarantee without giving up performance. FlatRv as an interpreter
