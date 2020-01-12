@@ -33,6 +33,7 @@ impl Host for TestHost {
     #[inline(always)]
     fn extension_enabled(ext: Extension) -> bool {
         match ext {
+            #[cfg(feature = "ext-a")]
             Extension::A => true,
         }
     }

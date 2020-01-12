@@ -212,13 +212,13 @@ impl<H: Host> OpcodeLut<H> {
         // as a "null pointer".
         let opcode_funct3 = unsafe {
             use core::mem::transmute;
-            let mut as_u64 = transmute::<_, [u64; OPCODE_LUT_SIZE]>(opcode_funct3);
-            for f in as_u64.iter_mut() {
+            let mut as_usize = transmute::<_, [usize; OPCODE_LUT_SIZE]>(opcode_funct3);
+            for f in as_usize.iter_mut() {
                 if *f == 0 {
-                    *f = core::u64::MAX;
+                    *f = core::usize::MAX;
                 }
             }
-            transmute::<_, [OpcodeHandler<H>; OPCODE_LUT_SIZE]>(as_u64)
+            transmute::<_, [OpcodeHandler<H>; OPCODE_LUT_SIZE]>(as_usize)
         };
 
         OpcodeLut { opcode_funct3 }
