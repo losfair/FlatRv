@@ -74,6 +74,7 @@ pub enum Exception {
     InvalidOpcode,
     InvalidMemoryReference,
     InstructionAddressMisaligned,
+    AtomicAddressMisaligned,
     InvalidLrscSequence,
     Ebreak,
     Wfi,
@@ -652,8 +653,12 @@ impl<H: Host> Machine<H> {
             _ => unreachable!(),
         };
 
+        let memref = self.gregs[inst_rs1(_inst)];
+        if unlikely(memref & 0b11 != 0) {
+            H::raise_exception(self, _pc.into(), Exception::AtomicAddressMisaligned);
+        }
         let memref =
-            unsafe { &*(self.translate_ptr(_pc, self.gregs[inst_rs1(_inst)]) as *mut AtomicU32) };
+            unsafe { &*(self.translate_ptr(_pc, memref) as *mut AtomicU32) };
         let rs2 = self.gregs[inst_rs2(_inst)];
         let rd = &mut self.gregs[inst_rd(_inst)];
         match func {
