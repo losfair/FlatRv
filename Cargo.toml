@@ -11,3 +11,7 @@ license = "MIT"
 spin = "0.5"
 bitflags = "1.2"
 goblin = { version = "0.1", default-features = false, features = ["elf32"] }
+
+[features]
+default = ["ext-a"]
+ext-a = []
