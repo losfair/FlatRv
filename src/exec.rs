@@ -675,8 +675,7 @@ impl<H: Host> Machine<H> {
             }
             0b00011 => {
                 // SC.W
-                if self.lr_sc && !self.lr_sc_failed {
-                    crate::exec_arch::atomic_sc(memref, rs2);
+                if self.lr_sc && !self.lr_sc_failed && crate::exec_arch::atomic_sc(memref, rs2) {
                     *rd = 0;
                 } else {
                     *rd = 1;

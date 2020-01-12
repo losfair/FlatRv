@@ -22,10 +22,11 @@ pub fn atomic_lr(p: &core::sync::atomic::AtomicU32) -> (u32, bool) {
 
 #[inline(always)]
 #[cfg(feature = "ext-a")]
-pub fn atomic_sc(p: &core::sync::atomic::AtomicU32, val: u32) {
+pub fn atomic_sc(p: &core::sync::atomic::AtomicU32, val: u32) -> bool {
     use core::arch::x86_64::_xend;
     p.store(val, core::sync::atomic::Ordering::Relaxed);
     unsafe {
         _xend();
     }
+    true
 }
