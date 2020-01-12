@@ -1,9 +1,7 @@
 #![no_std]
 #![feature(core_intrinsics, const_fn, atomic_min_max, stdsimd)]
 
-#[macro_use]
-extern crate bitflags;
-
+#[cfg(feature = "elf")]
 pub mod elf;
 pub mod exec;
 

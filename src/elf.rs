@@ -2,10 +2,7 @@ use core::ops::Range;
 use goblin::elf::{
     header::header32::Header, program_header::program_header32::ProgramHeader, program_header::*,
 };
-use spin::Mutex;
-
-/// Segment is executable.
-const PF_X: u32 = 1 << 0;
+use bitflags::bitflags;
 
 /// Segment is writable.
 const PF_W: u32 = 1 << 1;

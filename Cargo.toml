@@ -10,8 +10,9 @@ license = "MIT"
 [dependencies]
 spin = "0.5"
 bitflags = "1.2"
-goblin = { version = "0.1", default-features = false, features = ["elf32"] }
+goblin = { version = "0.1", default-features = false, features = ["elf32"], optional = true }
 
 [features]
-default = ["ext-a"]
+default = ["ext-a", "elf"]
 ext-a = []
+elf = ["goblin"]
